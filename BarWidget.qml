@@ -11,12 +11,12 @@ import "."
 // BarWidget.qml — a bare `BarWidget` would resolve to the file itself.)
 Ui.BarWidget {
   id: root
-  moduleName: "io.github.weedwhitesandwine.namazu"
+  moduleName: "io.github.weedwhitesandwine.japanquake"
 
   implicitWidth: button.implicitWidth
   implicitHeight: button.implicitHeight
 
-  readonly property var overlay: NamazuState.overlay
+  readonly property var overlay: JapanQuakeState.overlay
   readonly property var latest: overlay && overlay.quakes && overlay.quakes.length > 0
     ? overlay.quakes[0] : null
   readonly property string shindo: latest ? (latest.shindo || "") : ""
@@ -29,10 +29,10 @@ Ui.BarWidget {
     id: button
     anchors.fill: parent
     bar: root.bar
-    text: root.shindo === "" ? "鯰" : root.shindo
+    text: root.shindo === "" ? "震" : root.shindo
     tooltipText: root.latest
       ? (root.overlay.placeOf(root.latest) + " · shindo " + root.shindo)
-      : "Namazu — no earthquake data yet"
+      : "Japan Quake Monitor — no earthquake data yet"
     onPressed: function(b) {
       if (!root.overlay) return
       if (root.overlay.opened) root.overlay.close()

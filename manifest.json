@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
-  "id": "io.github.weedwhitesandwine.namazu",
-  "name": "Namazu",
+  "id": "io.github.weedwhitesandwine.japanquake",
+  "name": "Japan Quake Monitor",
   "version": "0.1.0",
   "author": "weedwhitesandwine",
   "license": "MIT",
@@ -12,11 +12,11 @@
   ],
   "keepLoaded": true,
   "entryPoints": {
-    "overlay": "Namazu.qml",
+    "overlay": "JapanQuake.qml",
     "barWidget": "BarWidget.qml"
   },
   "barWidget": {
-    "displayName": "Namazu",
+    "displayName": "Japan Quake Monitor",
     "description": "Shows the most recent Japanese earthquake and its intensity; click for the map",
     "category": "System",
     "allowMultiple": false,

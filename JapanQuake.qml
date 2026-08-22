@@ -8,10 +8,7 @@ import qs.Ui
 import "Shindo.js" as Shindo
 import "."
 
-// Namazu — Japanese earthquakes, on a map of Japan.
-//
-// Named for the giant catfish of Edo folklore that thrashes underground and
-// shakes the islands when the god meant to be pinning it down looks away.
+// Japan Quake Monitor — Japanese earthquakes, on a map of Japan.
 //
 // Two surfaces. The overlay is an ordinary focused panel you open deliberately:
 // the map, the recent list, and the detail of whichever quake is selected. The
@@ -26,7 +23,7 @@ Item {
     var u = String(Qt.resolvedUrl("."))
     return decodeURIComponent(u.replace(/^file:\/\//, "")).replace(/\/$/, "")
   }
-  readonly property string stateDir: root.home + "/.local/state/namazu"
+  readonly property string stateDir: root.home + "/.local/state/japanquake"
 
   // ------------------------------------------------------------------ theme
   property color foreground: Color.menu.text
@@ -41,8 +38,8 @@ Item {
   readonly property int labelWidth: Style.space(190)
 
   // --------------------------------------------------------------- settings
-  // Applying is the ONLY time Namazu writes outside its own state directory —
-  // its marked hotkey block and its own bar entry, both via namazu-ctl.sh.
+  // Applying is the ONLY time Japan Quake Monitor writes outside its own state directory —
+  // its marked hotkey block and its own bar entry, both via japanquake-ctl.sh.
   readonly property string settingsFile: root.stateDir + "/settings.json"
   property var nsettings: ({
     configured: false, threshold: "3", earlyWarning: true,
@@ -163,7 +160,7 @@ Item {
 
   function close() { root.opened = false; root.capturing = false }
 
-  Component.onCompleted: NamazuState.overlay = root
+  Component.onCompleted: JapanQuakeState.overlay = root
 
   // ------------------------------------------------------------ persistence
   function saveSettings() {
@@ -195,10 +192,10 @@ Item {
     }
     root.nsettings = s
     root.saveSettings()
-    Quickshell.execDetached(["bash", root.pluginDir + "/namazu-ctl.sh", "bar",
+    Quickshell.execDetached(["bash", root.pluginDir + "/japanquake-ctl.sh", "bar",
                              s.barIcon ? "on" : "off", s.barSection])
-    if (s.shortcut) Quickshell.execDetached(["bash", root.pluginDir + "/namazu-ctl.sh", "bind", s.shortcut])
-    else Quickshell.execDetached(["bash", root.pluginDir + "/namazu-ctl.sh", "unbind"])
+    if (s.shortcut) Quickshell.execDetached(["bash", root.pluginDir + "/japanquake-ctl.sh", "bind", s.shortcut])
+    else Quickshell.execDetached(["bash", root.pluginDir + "/japanquake-ctl.sh", "unbind"])
     root.view = "map"
   }
 
@@ -260,7 +257,7 @@ Item {
   Process {
     id: daemon
     command: ["setpriv", "--pdeathsig", "TERM",
-              "python3", root.pluginDir + "/namazud.py", "daemon"]
+              "python3", root.pluginDir + "/japanquaked.py", "daemon"]
     running: true
     onExited: daemonRestart.restart()
   }
@@ -273,7 +270,7 @@ Item {
 
   Process {
     id: refreshProc
-    command: ["python3", root.pluginDir + "/namazud.py", "once"]
+    command: ["python3", root.pluginDir + "/japanquaked.py", "once"]
     onExited: stateFile.reload()
   }
 
@@ -344,7 +341,7 @@ Item {
     visible: root.alertShown
     anchors { top: true; bottom: true; left: true; right: true }
     color: "transparent"
-    WlrLayershell.namespace: "namazu-alert"
+    WlrLayershell.namespace: "japanquake-alert"
     WlrLayershell.layer: WlrLayer.Overlay
     WlrLayershell.keyboardFocus: WlrKeyboardFocus.None
     exclusionMode: ExclusionMode.Ignore
@@ -499,7 +496,7 @@ Item {
     visible: root.opened
     anchors { top: true; bottom: true; left: true; right: true }
     color: "transparent"
-    WlrLayershell.namespace: "namazu"
+    WlrLayershell.namespace: "japanquake"
     WlrLayershell.layer: WlrLayer.Overlay
     WlrLayershell.keyboardFocus: WlrKeyboardFocus.Exclusive
     exclusionMode: ExclusionMode.Ignore
@@ -557,8 +554,8 @@ Item {
             id: title
             anchors.left: parent.left
             anchors.verticalCenter: parent.verticalCenter
-            text: root.view === "greeter" ? "鯰 welcome to Namazu"
-                : root.view === "settings" ? "Namazu settings" : "鯰 Namazu"
+            text: root.view === "greeter" ? "震 welcome to Japan Quake Monitor"
+                : root.view === "settings" ? "Japan Quake Monitor settings" : "震 Japan Quake Monitor"
             color: root.foreground
             font.family: root.fontFamily
             font.pixelSize: Style.font.heading
@@ -781,7 +778,7 @@ Item {
               width: parent.width
               visible: root.view === "greeter"
               wrapMode: Text.WordWrap
-              text: "Japan records around a dozen earthquakes a day, and most of them nobody feels. Choose how strong one has to be before Namazu interrupts you — everything quieter still appears on the map."
+              text: "Japan records around a dozen earthquakes a day, and most of them nobody feels. Choose how strong one has to be before Japan Quake Monitor interrupts you — everything quieter still appears on the map."
               color: root.foreground
               opacity: 0.75
               font.family: root.fontFamily
@@ -847,7 +844,7 @@ Item {
               wrapMode: Text.WordWrap
               text: root.draftEarlyWarning
                 ? "緊急地震速報 — warnings that arrive seconds before the shaking, rather than minutes after. They are forecasts: occasionally overstated, and sometimes cancelled outright. Keeping them on holds one network connection open."
-                : "Off. Namazu will only ever show confirmed reports, which arrive a couple of minutes after a quake and are never wrong. No connection is held open."
+                : "Off. Japan Quake Monitor will only ever show confirmed reports, which arrive a couple of minutes after a quake and are never wrong. No connection is held open."
               color: root.foreground
               opacity: 0.6
               font.family: root.fontFamily
@@ -917,7 +914,7 @@ Item {
             Text {
               width: parent.width
               wrapMode: Text.WordWrap
-              text: "Applying saves these choices, updates Namazu's own marked hotkey block in bindings.lua, and adds or removes its bar icon. Nothing else is touched."
+              text: "Applying saves these choices, updates Japan Quake Monitor's own marked hotkey block in bindings.lua, and adds or removes its bar icon. Nothing else is touched."
               color: root.foreground
               opacity: 0.55
               font.family: root.fontFamily
@@ -927,7 +924,7 @@ Item {
             Row {
               spacing: Style.spacing.md
               SettingPill {
-                label: root.view === "greeter" ? "Start Namazu" : "Apply"
+                label: root.view === "greeter" ? "Start Japan Quake Monitor" : "Apply"
                 active: true
                 onPicked: root.applyDrafts()
               }

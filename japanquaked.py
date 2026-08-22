@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Namazu's engine.
+"""Japan Quake Monitor's engine.
 
 Two feeds, both from the P2P地震情報 relay of JMA's own bulletins:
 
@@ -11,7 +11,7 @@ Two feeds, both from the P2P地震情報 relay of JMA's own bulletins:
     event it warned about. It comes over a WebSocket instead, and only when
     the user has switched early warnings on.
 
-Everything is written to ~/.local/state/namazu/state.json. Nothing is ever
+Everything is written to ~/.local/state/japanquake/state.json. Nothing is ever
 written inside the plugin directory: the shell watches that tree and reloads
 the plugin on every write there.
 
@@ -32,11 +32,11 @@ import urllib.error
 import urllib.request
 
 STATE_DIR = os.path.join(
-    os.environ.get("XDG_STATE_HOME", os.path.expanduser("~/.local/state")), "namazu"
+    os.environ.get("XDG_STATE_HOME", os.path.expanduser("~/.local/state")), "japanquake"
 )
 STATE_FILE = os.path.join(STATE_DIR, "state.json")
 SETTINGS_FILE = os.path.join(STATE_DIR, "settings.json")
-LOCK_FILE = os.path.join(STATE_DIR, "namazud.lock")
+LOCK_FILE = os.path.join(STATE_DIR, "japanquaked.lock")
 NAMES_FILE = os.path.join(STATE_DIR, "place-names.json")
 
 HISTORY_URL = "https://api.p2pquake.net/v2/history?codes=551&limit=40"
@@ -45,7 +45,7 @@ HISTORY_URL = "https://api.p2pquake.net/v2/history?codes=551&limit=40"
 # -> English dictionary of place names, which is cached and grows over time.
 JMA_LIST_URL = "https://www.jma.go.jp/bosai/quake/data/list.json"
 WS_HOST, WS_PORT, WS_PATH = "api.p2pquake.net", 443, "/v2/ws"
-USER_AGENT = "namazu-omarchy-plugin/0.1 (+https://github.com/weedwhitesandwine/namazu)"
+USER_AGENT = "japanquake-omarchy-plugin/0.1 (+https://github.com/weedwhitesandwine/japanquake)"
 
 POLL_SECONDS = 30
 
@@ -74,7 +74,7 @@ TSUNAMI = {
 
 
 def log(*a):
-    print("namazud:", *a, file=sys.stderr, flush=True)
+    print("japanquaked:", *a, file=sys.stderr, flush=True)
 
 
 def ensure_state_dir():
@@ -265,8 +265,48 @@ def fetch_reports():
         data = json.load(r)
     quakes = [clean_quake(i) for i in data if isinstance(i, dict)]
     quakes = [q for q in quakes if q["time"]]
+    quakes = merge_bulletins(quakes)
     write_state(quakes=quakes, error=None)
     return quakes
+
+
+def merge_bulletins(quakes):
+    """One earthquake, one entry.
+
+    JMA issues a quake in instalments: an intensity-only 震度速報 within seconds,
+    then the epicentre, then the full report. The relay passes each one along
+    separately, so a single event arrives as up to three records sharing a
+    timestamp — which is why an unmerged list shows the same quake three times,
+    once without an epicentre and once without an intensity.
+
+    They are folded into whichever record is most complete, field by field, so
+    a later bulletin that drops a detail an earlier one carried cannot lose it.
+    """
+    merged = {}
+    order = []
+    for q in quakes:
+        key = q["time"]
+        if key not in merged:
+            merged[key] = dict(q)
+            order.append(key)
+            continue
+        into = merged[key]
+        for field in ("place", "placeEn", "lat", "lon", "depth", "magnitude",
+                      "distance", "bearing"):
+            if into.get(field) in (None, "") and q.get(field) not in (None, ""):
+                into[field] = q[field]
+        # Intensity: the strongest reading anyone reported for this quake.
+        if q["rank"] > into["rank"]:
+            into["shindo"], into["rank"] = q["shindo"], q["rank"]
+        if len(q["prefectures"]) > len(into["prefectures"]):
+            into["prefectures"] = q["prefectures"]
+        if q["tsunami"] not in ("unknown",) and into["tsunami"] == "unknown":
+            into["tsunami"] = q["tsunami"]
+        # Keep the id of the fullest bulletin so "have I shown this?" is stable.
+        if q["report"] == "DetailScale":
+            into["id"] = q["id"]
+            into["report"] = q["report"]
+    return [merged[k] for k in order]
 
 
 # --------------------------------------------------------------------------

@@ -1,26 +1,26 @@
 #!/bin/bash
-# Namazu settings helper. Runs ONLY when the user applies a choice in Namazu's
+# Japan Quake Monitor settings helper. Runs ONLY when the user applies a choice in Japan Quake Monitor's
 # settings card — never on its own.
 #
-#   namazu-ctl.sh bind "SUPER + ALT + J"   manage Namazu's hotkey as a marked
+#   japanquake-ctl.sh bind "SUPER + ALT + J"   manage Japan Quake Monitor's hotkey as a marked
 #                                          block in ~/.config/hypr/bindings.lua
 #                                          (replaces only its own block, never
 #                                          other lines)
-#   namazu-ctl.sh unbind                   remove that block
-#   namazu-ctl.sh bar on|off [section]     add/remove the Namazu icon in the
+#   japanquake-ctl.sh unbind                   remove that block
+#   japanquake-ctl.sh bar on|off [section]     add/remove the Japan Quake Monitor icon in the
 #                                          bar layout (~/.config/omarchy/shell.json)
 set -e
 
-ID="io.github.weedwhitesandwine.namazu"
+ID="io.github.weedwhitesandwine.japanquake"
 BIND_FILE="$HOME/.config/hypr/bindings.lua"
-MARK_IN="-- >>> namazu hotkey (managed by Namazu settings — change it there)"
-MARK_OUT="-- <<< namazu hotkey"
+MARK_IN="-- >>> japanquake hotkey (managed by Japan Quake Monitor settings — change it there)"
+MARK_OUT="-- <<< japanquake hotkey"
 
 strip_block() {
-  # print bindings.lua without Namazu's marked block
+  # print bindings.lua without Japan Quake Monitor's marked block
   awk '
-    index($0, ">>> namazu hotkey") { skip = 1; next }
-    index($0, "<<< namazu hotkey") { skip = 0; next }
+    index($0, ">>> japanquake hotkey") { skip = 1; next }
+    index($0, "<<< japanquake hotkey") { skip = 0; next }
     !skip { print }
   ' "$BIND_FILE"
 }
@@ -34,7 +34,7 @@ case "$1" in
     {
       echo ""
       echo "$MARK_IN"
-      printf 'o.bind("%s", "Namazu (earthquake map)", "omarchy-shell shell toggle %s")\n' "$key" "$ID"
+      printf 'o.bind("%s", "Japan Quake Monitor (earthquake map)", "omarchy-shell shell toggle %s")\n' "$key" "$ID"
       echo "$MARK_OUT"
     } >> "$tmp"
     mv "$tmp" "$BIND_FILE"
@@ -49,14 +49,14 @@ case "$1" in
     ;;
   bar)
     # bar on [left|center|right] | bar off
-    # The icon is visible when Namazu's entry lives in the bar layout of
+    # The icon is visible when Japan Quake Monitor's entry lives in the bar layout of
     # shell.json; hidden (but the plugin still enabled) when the entry lives
     # in the plugins list instead. The shell hot-reloads the file.
     python3 - "$2" "${3:-right}" <<'PY'
 import json, os, sys
 state = sys.argv[1]
 sec = sys.argv[2] if sys.argv[2] in ("left", "center", "right") else "right"
-ID = "io.github.weedwhitesandwine.namazu"
+ID = "io.github.weedwhitesandwine.japanquake"
 p = os.path.expanduser("~/.config/omarchy/shell.json")
 try:
     with open(p) as f:
@@ -94,7 +94,7 @@ if state == "on":
 else:
     cfg["plugins"].append(entry)
 
-tmp = p + ".namazu.tmp"
+tmp = p + ".japanquake.tmp"
 with open(tmp, "w") as f:
     json.dump(cfg, f, indent=2)
     f.write("\n")
@@ -102,7 +102,7 @@ os.replace(tmp, p)
 PY
     ;;
   *)
-    echo "usage: namazu-ctl.sh bind <keys> | unbind | bar on|off [section]" >&2
+    echo "usage: japanquake-ctl.sh bind <keys> | unbind | bar on|off [section]" >&2
     exit 2
     ;;
 esac
