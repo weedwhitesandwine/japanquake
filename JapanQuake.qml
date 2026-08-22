@@ -174,7 +174,15 @@ Item {
   Component.onCompleted: JapanQuakeState.overlay = root
 
   // ------------------------------------------------------------ persistence
+  // state.json and settings.json load independently, and the quake state
+  // usually wins the race. Recording "I have seen this quake" then persisted
+  // the not-yet-loaded defaults straight over the user's real settings, which
+  // is how a chosen threshold could silently revert. Nothing is written until
+  // the settings themselves have been read at least once.
+  property bool settingsLoaded: false
+
   function saveSettings() {
+    if (!root.settingsLoaded) return
     Quickshell.execDetached(["bash", "-c",
       'mkdir -p "$(dirname "$2")" && printf "%s\\n" "$1" > "$2"', "--",
       JSON.stringify(root.nsettings), root.settingsFile])
@@ -260,7 +268,11 @@ Item {
         if (!s || typeof s !== "object" || Array.isArray(s)) return
         root.nsettings = s
       } catch (e) {}
+      root.settingsLoaded = true
     }
+    // No settings file yet is a perfectly good answer: it means first run, and
+    // the defaults in memory are the truth.
+    onLoadFailed: root.settingsLoaded = true
     onFileChanged: reload()
   }
 
