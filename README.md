@@ -170,8 +170,15 @@ so it is treated as data and never as code:
   the only safe answer to anything unexpected.
 - Every text field on screen renders as plain text, never as rich text, so a
   place name or a stored value cannot cause the shell to load a resource.
-- Files and network responses are checked against a size ceiling before they
-  are parsed, because this runs inside a shell process that lives for days.
+- Files and network responses stop at a size ceiling as they are read, not
+  after, because this runs inside a shell process that lives for days. The
+  engine reads each of its own files up to its ceiling and one byte further —
+  that byte is what tells it the file is too big — and refuses it there. The
+  shell reads them through `head`, so it is handed at most the ceiling however
+  large the file on disk actually is; anything larger arrives cut off, fails to
+  parse, and is refused, leaving the last good values in place. A 400 MB file
+  planted in place of the state file moves the shell's memory by about 7 MB and
+  changes nothing on screen.
 
 ## Dependencies
 
