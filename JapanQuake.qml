@@ -610,7 +610,11 @@ Item {
             visible: root.view === "map"
 
             SettingPill { label: "refresh"; onPicked: root.refresh() }
-            SettingPill { label: "⚙"; onPicked: { root.syncDrafts(); root.view = "settings" } }
+            SettingPill {
+              label: "settings"
+              active: true
+              onPicked: { root.syncDrafts(); root.view = "settings" }
+            }
           }
         }
 
