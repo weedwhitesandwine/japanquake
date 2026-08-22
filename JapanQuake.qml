@@ -171,7 +171,11 @@ Item {
 
   function close() { root.opened = false; root.capturing = false }
 
-  Component.onCompleted: JapanQuakeState.overlay = root
+  Component.onCompleted: {
+    JapanQuakeState.overlay = root
+    root.readSettings()
+    root.readState()
+  }
 
   // ------------------------------------------------------------ persistence
   // state.json and settings.json load independently, and the quake state
@@ -250,53 +254,85 @@ Item {
     root.capturing = false
   }
 
-  // Settings are a handful of short values. A file far larger than that is not
-  // settings, and this shell lives for days — so it is refused before it is
-  // parsed rather than after.
+  // Settings are a handful of short values; the state file is a few hundred
+  // quakes at most. Both are written by the engine, but they sit on disk, where
+  // a restored backup or anything else could have put something quite different
+  // — and this shell stays up for days, so a file it reads is a file it has to
+  // hold. Reading them through `head` puts the ceiling before the read rather
+  // than after it: whatever is on disk, the shell is handed at most this many
+  // bytes. Anything larger arrives cut off, fails to parse, and is refused,
+  // leaving the last good values in place.
   readonly property int settingsCeiling: 16 * 1024
   readonly property int stateCeiling: 4 * 1024 * 1024
 
+  // The watchers read nothing themselves. blockAllReads keeps the file out of
+  // the shell's memory altogether, leaving them the one job we actually want
+  // from them: saying that something changed.
   FileView {
     path: root.settingsFile
     printErrors: false
     watchChanges: true
-    onLoaded: {
-      try {
-        var raw = text()
-        if (!raw || raw.length > root.settingsCeiling) return
-        var s = JSON.parse(raw)
-        if (!s || typeof s !== "object" || Array.isArray(s)) return
-        root.nsettings = s
-      } catch (e) {}
-      root.settingsLoaded = true
-    }
-    // No settings file yet is a perfectly good answer: it means first run, and
-    // the defaults in memory are the truth.
-    onLoadFailed: root.settingsLoaded = true
-    onFileChanged: reload()
+    blockAllReads: true
+    preload: false
+    onFileChanged: root.readSettings()
   }
 
   FileView {
-    id: stateFile
     path: root.stateDir + "/state.json"
     printErrors: false
     watchChanges: true
-    onLoaded: {
-      try {
-        var raw = text()
-        if (!raw || raw.length > root.stateCeiling) return
-        var s = JSON.parse(raw)
-        if (!s || typeof s !== "object" || Array.isArray(s)) return
-        root.quakes = Array.isArray(s.quakes) ? s.quakes.slice(0, 200) : []
-        root.eew = s.eew || null
-        root.eewConnected = s.eewConnected === true
-        root.feedError = s.error || ""
-        if (root.selectedIndex >= root.quakes.length) root.selectedIndex = 0
-        root.considerReport()
-        root.considerEew()
-      } catch (e) {}
+    blockAllReads: true
+    preload: false
+    onFileChanged: root.readState()
+  }
+
+  function readSettings() {
+    settingsReader.running = false
+    settingsReader.running = true
+  }
+
+  function readState() {
+    stateReader.running = false
+    stateReader.running = true
+  }
+
+  Process {
+    id: settingsReader
+    command: ["head", "-c", String(root.settingsCeiling), "--", root.settingsFile]
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: {
+        try {
+          var s = JSON.parse(text)
+          if (s && typeof s === "object" && !Array.isArray(s)) root.nsettings = s
+        } catch (e) {}
+      }
     }
-    onFileChanged: reload()
+    // No settings file yet is a perfectly good answer: it means first run, and
+    // the defaults in memory are the truth. Either way the answer is in, and
+    // settings may now be written back.
+    onExited: root.settingsLoaded = true
+  }
+
+  Process {
+    id: stateReader
+    command: ["head", "-c", String(root.stateCeiling), "--", root.stateDir + "/state.json"]
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: {
+        try {
+          var s = JSON.parse(text)
+          if (!s || typeof s !== "object" || Array.isArray(s)) return
+          root.quakes = Array.isArray(s.quakes) ? s.quakes.slice(0, 200) : []
+          root.eew = s.eew || null
+          root.eewConnected = s.eewConnected === true
+          root.feedError = s.error || ""
+          if (root.selectedIndex >= root.quakes.length) root.selectedIndex = 0
+          root.considerReport()
+          root.considerEew()
+        } catch (e) {}
+      }
+    }
   }
 
   // The engine. A child of the shell so its life matches the shell's, with
@@ -319,7 +355,7 @@ Item {
   Process {
     id: refreshProc
     command: ["python3", root.pluginDir + "/japanquaked.py", "once"]
-    onExited: stateFile.reload()
+    onExited: root.readState()
   }
 
   function refresh() { refreshProc.running = false; refreshProc.running = true }

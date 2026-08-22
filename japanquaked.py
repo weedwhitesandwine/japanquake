@@ -56,6 +56,14 @@ MAX_HTTP_BYTES = 4 * 1024 * 1024
 MAX_FRAME_BYTES = 1 * 1024 * 1024
 MAX_QUAKES = 200
 
+# The same idea for the files in the state directory. This process writes them,
+# but it does not own the disk: a restored backup, or anything else with write
+# access to a home directory, can leave something quite different behind. Each
+# is read up to its ceiling and no further, before it is parsed.
+MAX_SETTINGS_BYTES = 16 * 1024
+MAX_STATE_BYTES = 4 * 1024 * 1024
+MAX_NAMES_BYTES = 1 * 1024 * 1024
+
 TOKYO_LAT, TOKYO_LON = 35.681, 139.767
 
 # JMA's shindo scale is not linear and is not a number: 5 and 6 are each split
@@ -104,10 +112,20 @@ def take_lock():
     return fd
 
 
+def read_json_file(path, ceiling):
+    """Read one of our own state files, refusing it if it is past its ceiling.
+    Reading a byte more than the ceiling is what tells us it is too big, so
+    nothing larger is ever held, let alone parsed."""
+    with open(path, "rb") as f:
+        raw = f.read(ceiling + 1)
+    if len(raw) > ceiling:
+        raise ValueError("%s is larger than %d bytes" % (path, ceiling))
+    return json.loads(raw.decode("utf-8", "replace"))
+
+
 def read_settings():
     try:
-        with open(SETTINGS_FILE) as f:
-            s = json.load(f)
+        s = read_json_file(SETTINGS_FILE, MAX_SETTINGS_BYTES)
         return s if isinstance(s, dict) else {}
     except Exception:
         return {}
@@ -122,8 +140,9 @@ def place_names():
     global _names
     if _names is None:
         try:
-            with open(NAMES_FILE) as f:
-                _names = json.load(f)
+            _names = read_json_file(NAMES_FILE, MAX_NAMES_BYTES)
+            if not isinstance(_names, dict):
+                _names = {}
         except Exception:
             _names = {}
     return _names
@@ -259,8 +278,9 @@ def clean_eew(item):
 def write_state(**changes):
     ensure_state_dir()
     try:
-        with open(STATE_FILE) as f:
-            state = json.load(f)
+        state = read_json_file(STATE_FILE, MAX_STATE_BYTES)
+        if not isinstance(state, dict):
+            state = {}
     except Exception:
         state = {}
     state.update(changes)
