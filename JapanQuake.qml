@@ -184,7 +184,7 @@ Item {
     root.draftThreshold = root.nsettings.threshold || "3"
     root.draftEarlyWarning = root.nsettings.earlyWarning !== false
     root.draftSound = root.nsettings.sound !== false
-    root.draftShortcut = root.nsettings.shortcut || ""
+    root.draftShortcut = root.validShortcut(root.nsettings.shortcut) ? root.nsettings.shortcut : ""
     root.draftBarIcon = root.nsettings.barIcon !== false
     root.draftBarSection = root.nsettings.barSection || "right"
     root.capturing = false
@@ -197,7 +197,7 @@ Item {
       threshold: root.draftThreshold,
       earlyWarning: root.draftEarlyWarning,
       sound: root.draftSound,
-      shortcut: root.draftShortcut,
+      shortcut: root.validShortcut(root.draftShortcut) ? root.draftShortcut : "",
       barIcon: root.draftBarIcon,
       barSection: root.draftBarSection,
       lastSeen: root.nsettings.lastSeen || "",
@@ -207,9 +207,21 @@ Item {
     root.saveSettings()
     Quickshell.execDetached(["bash", root.pluginDir + "/japanquake-ctl.sh", "bar",
                              s.barIcon ? "on" : "off", s.barSection])
-    if (s.shortcut) Quickshell.execDetached(["bash", root.pluginDir + "/japanquake-ctl.sh", "bind", s.shortcut])
-    else Quickshell.execDetached(["bash", root.pluginDir + "/japanquake-ctl.sh", "unbind"])
+    if (root.validShortcut(s.shortcut))
+      Quickshell.execDetached(["bash", root.pluginDir + "/japanquake-ctl.sh", "bind", s.shortcut])
+    else
+      Quickshell.execDetached(["bash", root.pluginDir + "/japanquake-ctl.sh", "unbind"])
     root.view = "map"
+  }
+
+  // A hotkey is a fixed shape: one or more modifiers, then one key. Anything
+  // else is not a hotkey, and since this value is written into bindings.lua as
+  // Lua source, "anything else" has to mean rejected rather than escaped.
+  readonly property var shortcutPattern:
+    /^(SUPER|CTRL|ALT|SHIFT)( \+ (SUPER|CTRL|ALT|SHIFT))* \+ ([A-Z0-9]|F([1-9]|1[0-2]))$/
+
+  function validShortcut(s) {
+    return typeof s === "string" && s.length <= 40 && root.shortcutPattern.test(s)
   }
 
   function captureKey(event) {
@@ -230,14 +242,23 @@ Item {
     root.capturing = false
   }
 
+  // Settings are a handful of short values. A file far larger than that is not
+  // settings, and this shell lives for days — so it is refused before it is
+  // parsed rather than after.
+  readonly property int settingsCeiling: 16 * 1024
+  readonly property int stateCeiling: 4 * 1024 * 1024
+
   FileView {
     path: root.settingsFile
     printErrors: false
     watchChanges: true
     onLoaded: {
       try {
-        var s = JSON.parse(text())
-        if (s && typeof s === "object") root.nsettings = s
+        var raw = text()
+        if (!raw || raw.length > root.settingsCeiling) return
+        var s = JSON.parse(raw)
+        if (!s || typeof s !== "object" || Array.isArray(s)) return
+        root.nsettings = s
       } catch (e) {}
     }
     onFileChanged: reload()
@@ -250,9 +271,11 @@ Item {
     watchChanges: true
     onLoaded: {
       try {
-        var s = JSON.parse(text())
-        if (!s || typeof s !== "object") return
-        root.quakes = s.quakes || []
+        var raw = text()
+        if (!raw || raw.length > root.stateCeiling) return
+        var s = JSON.parse(raw)
+        if (!s || typeof s !== "object" || Array.isArray(s)) return
+        root.quakes = Array.isArray(s.quakes) ? s.quakes.slice(0, 200) : []
         root.eew = s.eew || null
         root.eewConnected = s.eewConnected === true
         root.feedError = s.error || ""
@@ -291,6 +314,7 @@ Item {
 
   // ------------------------------------------------------------- components
   component SettingLabel: Text {
+    textFormat: Text.PlainText
     width: root.labelWidth
     anchors.verticalCenter: parent.verticalCenter
     color: root.foreground
@@ -313,6 +337,7 @@ Item {
     border.width: pill.active ? 1 : 0
 
     Text {
+      textFormat: Text.PlainText
       id: pillLabel
       anchors.centerIn: parent
       text: pill.label
@@ -330,6 +355,7 @@ Item {
   }
 
   component DataLink: Text {
+    textFormat: Text.PlainText
     property string url: ""
     color: "#93c5fd"
     font.family: root.fontFamily
@@ -351,6 +377,7 @@ Item {
     radius: Style.space(6)
     color: Shindo.color(shindo)
     Text {
+      textFormat: Text.PlainText
       anchors.centerIn: parent
       text: parent.shindo || "?"
       color: "#ffffff"
@@ -421,6 +448,7 @@ Item {
             radius: Style.space(6)
             color: Color.urgent
             Text {
+              textFormat: Text.PlainText
               anchors.centerIn: parent
               text: "!"
               color: "#ffffff"
@@ -435,6 +463,7 @@ Item {
             spacing: Style.space(2)
 
             Text {
+              textFormat: Text.PlainText
               width: parent.width
               text: root.alertIsEew
                 ? (root.alertQuake && root.alertQuake.cancelled
@@ -448,6 +477,7 @@ Item {
             }
 
             Text {
+              textFormat: Text.PlainText
               width: parent.width
               text: root.alertIsEew
                 ? "Shaking may arrive shortly — this is a forecast, not a measurement"
@@ -462,6 +492,7 @@ Item {
         }
 
         Text {
+          textFormat: Text.PlainText
           width: parent.width
           text: root.placeOf(root.alertQuake)
           color: root.foreground
@@ -471,6 +502,7 @@ Item {
         }
 
         Text {
+          textFormat: Text.PlainText
           width: parent.width
           visible: root.alertQuake && root.alertQuake.place && root.alertQuake.placeEn
           text: root.alertQuake ? (root.alertQuake.place || "") : ""
@@ -481,6 +513,7 @@ Item {
         }
 
         Text {
+          textFormat: Text.PlainText
           width: parent.width
           text: root.fmtMagnitude(root.alertQuake) + " · " + root.fmtDepth(root.alertQuake)
                 + " · " + root.fmtDistance(root.alertQuake)
@@ -492,6 +525,7 @@ Item {
         }
 
         Text {
+          textFormat: Text.PlainText
           width: parent.width
           visible: !root.alertIsEew && root.alertQuake
                    && root.alertQuake.tsunami !== "none" && root.alertQuake.tsunami !== "unknown"
@@ -579,6 +613,7 @@ Item {
           height: Style.space(34)
 
           Text {
+            textFormat: Text.PlainText
             id: title
             anchors.left: parent.left
             anchors.verticalCenter: parent.verticalCenter
@@ -590,6 +625,7 @@ Item {
           }
 
           Text {
+            textFormat: Text.PlainText
             anchors.left: title.right
             anchors.leftMargin: Style.spacing.lg
             anchors.verticalCenter: parent.verticalCenter
@@ -663,6 +699,7 @@ Item {
                 spacing: Style.space(2)
 
                 Text {
+                  textFormat: Text.PlainText
                   width: parent.width
                   text: root.placeOf(root.selected)
                   color: root.foreground
@@ -671,6 +708,7 @@ Item {
                   wrapMode: Text.WordWrap
                 }
                 Text {
+                  textFormat: Text.PlainText
                   width: parent.width
                   visible: root.selected && root.selected.place && root.selected.placeEn
                   text: root.selected ? (root.selected.place || "") : ""
@@ -680,6 +718,7 @@ Item {
                   font.pixelSize: Style.font.caption
                 }
                 Text {
+                  textFormat: Text.PlainText
                   width: parent.width
                   text: root.selected ? (root.selected.time || "") : ""
                   color: root.foreground
@@ -688,6 +727,7 @@ Item {
                   font.pixelSize: Style.font.caption
                 }
                 Text {
+                  textFormat: Text.PlainText
                   width: parent.width
                   text: root.fmtMagnitude(root.selected) + " · " + root.fmtDepth(root.selected)
                   color: root.foreground
@@ -696,6 +736,7 @@ Item {
                   font.pixelSize: Style.font.body
                 }
                 Text {
+                  textFormat: Text.PlainText
                   width: parent.width
                   text: root.fmtDistance(root.selected)
                   color: root.foreground
@@ -704,6 +745,7 @@ Item {
                   font.pixelSize: Style.font.body
                 }
                 Text {
+                  textFormat: Text.PlainText
                   width: parent.width
                   text: Shindo.meaning(root.selected ? root.selected.shindo : "")
                   color: root.foreground
@@ -713,6 +755,7 @@ Item {
                   font.pixelSize: Style.font.caption
                 }
                 Text {
+                  textFormat: Text.PlainText
                   width: parent.width
                   visible: root.selected && root.selected.tsunami !== "none"
                            && root.selected.tsunami !== "unknown"
@@ -763,6 +806,7 @@ Item {
                   }
 
                   Text {
+                    textFormat: Text.PlainText
                     anchors.verticalCenter: parent.verticalCenter
                     width: parent.width - Style.space(22) - Style.space(120)
                     text: root.placeOf(modelData)
@@ -774,6 +818,7 @@ Item {
                   }
 
                   Text {
+                    textFormat: Text.PlainText
                     anchors.verticalCenter: parent.verticalCenter
                     text: (modelData.time || "").slice(5, 16)
                     color: root.foreground
@@ -807,6 +852,7 @@ Item {
             spacing: Style.spacing.xl
 
             Text {
+              textFormat: Text.PlainText
               width: parent.width
               visible: root.view === "greeter"
               wrapMode: Text.WordWrap
@@ -835,6 +881,7 @@ Item {
             }
 
             Text {
+              textFormat: Text.PlainText
               width: parent.width
               wrapMode: Text.WordWrap
               text: {
@@ -872,6 +919,7 @@ Item {
             }
 
             Text {
+              textFormat: Text.PlainText
               width: parent.width
               wrapMode: Text.WordWrap
               text: root.draftEarlyWarning
@@ -910,6 +958,7 @@ Item {
             }
 
             Text {
+              textFormat: Text.PlainText
               width: parent.width
               wrapMode: Text.WordWrap
               text: "A short chime when a quake passes your threshold, and a more insistent one for an early warning — different on purpose, because they mean different things. The two buttons play them now."
@@ -931,6 +980,7 @@ Item {
                 border.color: root.border
                 border.width: 1
                 Text {
+                  textFormat: Text.PlainText
                   anchors.centerIn: parent
                   text: root.capturing ? "press your keys…"
                     : (root.draftShortcut !== "" ? root.draftShortcut : "none set")
@@ -948,6 +998,7 @@ Item {
             }
 
             Text {
+              textFormat: Text.PlainText
               width: parent.width
               visible: root.captureNote !== ""
               text: root.captureNote
@@ -986,6 +1037,7 @@ Item {
               spacing: Style.space(3)
 
               Text {
+                textFormat: Text.PlainText
                 width: parent.width
                 wrapMode: Text.WordWrap
                 text: "Every figure shown here comes from the Japan Meteorological Agency. This plugin measures nothing itself — check JMA directly for anything that matters."
@@ -1012,6 +1064,7 @@ Item {
             }
 
             Text {
+              textFormat: Text.PlainText
               width: parent.width
               wrapMode: Text.WordWrap
               text: "Applying saves these choices, updates Japan Quake Monitor's own marked hotkey block in bindings.lua, and adds or removes its bar icon. Nothing else is touched."

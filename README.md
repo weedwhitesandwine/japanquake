@@ -158,6 +158,21 @@ helper), `bash` (the helper script and the settings write), `hyprctl reload` so
 a newly chosen hotkey takes effect, `xdg-open` when you click one of the
 data-source links on the settings page, and `pw-play` for the alert sound.
 
+## Handling untrusted input
+
+Everything this plugin displays arrives from somewhere it does not control — a
+network feed, or a settings file that could have been restored from a backup —
+so it is treated as data and never as code:
+
+- The hotkey is validated against a fixed shape (modifiers, then one key) in
+  both the settings card and the helper script, and refused outright if it does
+  not match. It is written into `bindings.lua` as Lua source, so "refused" is
+  the only safe answer to anything unexpected.
+- Every text field on screen renders as plain text, never as rich text, so a
+  place name or a stored value cannot cause the shell to load a resource.
+- Files and network responses are checked against a size ceiling before they
+  are parsed, because this runs inside a shell process that lives for days.
+
 ## Dependencies
 
 `bash`, `python3`, `hyprctl` and `pw-play`, all of which Omarchy already

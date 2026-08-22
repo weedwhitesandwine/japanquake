@@ -49,6 +49,13 @@ USER_AGENT = "japanquake-omarchy-plugin/0.1 (+https://github.com/weedwhitesandwi
 
 POLL_SECONDS = 30
 
+# Ceilings on anything that arrives from the network. These feeds answer with a
+# few tens of kilobytes; a response orders of magnitude larger is not a feed,
+# and this process is long-lived, so it is truncated before it is parsed.
+MAX_HTTP_BYTES = 4 * 1024 * 1024
+MAX_FRAME_BYTES = 1 * 1024 * 1024
+MAX_QUAKES = 200
+
 TOKYO_LAT, TOKYO_LON = 35.681, 139.767
 
 # JMA's shindo scale is not linear and is not a number: 5 and 6 are each split
@@ -122,10 +129,19 @@ def place_names():
     return _names
 
 
-def refresh_place_names():
-    req = urllib.request.Request(JMA_LIST_URL, headers={"User-Agent": USER_AGENT})
+def fetch_json(url):
+    req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
     with urllib.request.urlopen(req, timeout=20) as r:
-        data = json.load(r)
+        raw = r.read(MAX_HTTP_BYTES + 1)
+    if len(raw) > MAX_HTTP_BYTES:
+        raise ValueError("response larger than %d bytes" % MAX_HTTP_BYTES)
+    return json.loads(raw.decode("utf-8", "replace"))
+
+
+def refresh_place_names():
+    data = fetch_json(JMA_LIST_URL)
+    if not isinstance(data, list):
+        return 0
     names = place_names()
     added = 0
     for item in data:
@@ -260,10 +276,10 @@ def fetch_reports():
         refresh_place_names()
     except Exception as e:
         log("place-name refresh failed (names stay Japanese):", e)
-    req = urllib.request.Request(HISTORY_URL, headers={"User-Agent": USER_AGENT})
-    with urllib.request.urlopen(req, timeout=20) as r:
-        data = json.load(r)
-    quakes = [clean_quake(i) for i in data if isinstance(i, dict)]
+    data = fetch_json(HISTORY_URL)
+    if not isinstance(data, list):
+        raise ValueError("feed did not return a list")
+    quakes = [clean_quake(i) for i in data[:MAX_QUAKES] if isinstance(i, dict)]
     quakes = [q for q in quakes if q["time"]]
     quakes = merge_bulletins(quakes)
     write_state(quakes=quakes, error=None)
@@ -375,6 +391,8 @@ class WebSocket:
             length = struct.unpack(">H", self._recv_exactly(2))[0]
         elif length == 127:
             length = struct.unpack(">Q", self._recv_exactly(8))[0]
+        if length > MAX_FRAME_BYTES:
+            raise ConnectionError("frame of %d bytes refused" % length)
         if b1 & 0x80:                       # a server must never mask
             self._recv_exactly(4)
         payload = self._recv_exactly(length) if length else b""
