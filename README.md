@@ -9,6 +9,33 @@ the interesting question is never "did one happen" but "was that one worth
 knowing about". Japan Quake Monitor answers it: every quake lands on the map and in the list,
 and only the ones above a threshold you choose take over the screen.
 
+## Where the data comes from
+
+Every number this plugin shows — the epicentre, the magnitude, the depth, the
+intensity, the tsunami status — originates with the **Japan Meteorological
+Agency** (気象庁 / JMA), which is the official and only authoritative source for
+earthquake information in Japan. Japan Quake Monitor measures nothing itself,
+calculates nothing, and interprets nothing. It displays JMA's published
+bulletins and adds only the distance from Tokyo.
+
+It reaches those bulletins by two routes:
+
+- **[P2P地震情報](https://www.p2pquake.net/)** (`api.p2pquake.net`), an
+  independent Japanese service that republishes JMA's bulletins as JSON, and
+  pushes them over a WebSocket as they are issued. This is where the confirmed
+  reports and the early warnings come from. It is a relay, not a second
+  opinion: the content is JMA's.
+- **[JMA directly](https://www.jma.go.jp/bosai/map.html)** (`www.jma.go.jp`),
+  read only to get the official English name for each epicentre, which the
+  relay does not carry.
+
+The coastline is [Natural Earth](https://www.naturalearthdata.com/) 1:50m
+Admin 0, which is in the public domain.
+
+This is a convenience for looking at published information. It is not an
+emergency system, it is not operated by or affiliated with JMA, and it should
+not be the thing you rely on in a real earthquake.
+
 ## What it shows
 
 The map plots each epicentre as a disc, sized by magnitude and coloured by
@@ -112,18 +139,6 @@ the settings, never on its own:
 **Commands it runs:** `python3` (the engine, and the JSON edit inside the
 helper), `bash` (the helper script and the settings write), and `hyprctl reload`
 so a newly chosen hotkey takes effect.
-
-## Data and attribution
-
-- Earthquake data comes from the Japan Meteorological Agency, relayed by
-  [P2P地震情報](https://www.p2pquake.net/). JMA is the source of every figure
-  shown; Japan Quake Monitor adds nothing to it and interprets nothing.
-- The coastline is [Natural Earth](https://www.naturalearthdata.com/) 1:50m
-  Admin 0, which is in the public domain.
-
-Japan Quake Monitor is a convenience for looking at published information. It is not an
-emergency system, it is not operated by JMA, and it should not be the thing you
-rely on in a real earthquake.
 
 ## Dependencies
 
