@@ -71,6 +71,23 @@ need a connection held open rather than a feed checked periodically. Switching
 them off in the settings closes that connection, and Japan Quake Monitor then only polls for
 confirmed reports.
 
+## The sound
+
+A short chime when a quake passes your threshold, and a different, more
+insistent one for an early warning — different on purpose, because the two mean
+different things. Either can be switched off in the settings, where there are
+also two buttons to play them on demand.
+
+Both are generated rather than sampled: two detuned oscillators beating against
+each other, intervals pulled forty cents off equal temperament so they never
+quite resolve, a pitch that sags as the sound decays, and the whole thing played
+backwards, so it swells out of nothing and stops dead. The script that produces
+them is `sounds/make-sounds.py`, and running it regenerates both files — nothing
+about them is borrowed, and nothing is hidden.
+
+They are deliberately *not* an imitation of Japan's broadcast early-warning
+chime, which is a copyrighted composition.
+
 ## Install
 
 ```
@@ -138,12 +155,13 @@ the settings, never on its own:
 
 **Commands it runs:** `python3` (the engine, and the JSON edit inside the
 helper), `bash` (the helper script and the settings write), `hyprctl reload` so
-a newly chosen hotkey takes effect, and `xdg-open` when you click one of the
-data-source links on the settings page.
+a newly chosen hotkey takes effect, `xdg-open` when you click one of the
+data-source links on the settings page, and `pw-play` for the alert sound.
 
 ## Dependencies
 
-`bash`, `python3` and `hyprctl`, all of which Omarchy already installs.
+`bash`, `python3`, `hyprctl` and `pw-play`, all of which Omarchy already
+installs — `pw-play` comes with PipeWire.
 
 ## Licence
 

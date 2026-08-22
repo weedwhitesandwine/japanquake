@@ -42,12 +42,13 @@ Item {
   // its marked hotkey block and its own bar entry, both via japanquake-ctl.sh.
   readonly property string settingsFile: root.stateDir + "/settings.json"
   property var nsettings: ({
-    configured: false, threshold: "3", earlyWarning: true,
+    configured: false, threshold: "3", earlyWarning: true, sound: true,
     shortcut: "", barIcon: true, barSection: "right", lastSeen: "", lastEew: ""
   })
 
   property string draftThreshold: "3"
   property bool draftEarlyWarning: true
+  property bool draftSound: true
   property string draftShortcut: ""
   property bool draftBarIcon: true
   property string draftBarSection: "right"
@@ -96,9 +97,19 @@ Item {
     return q.place || q.placeEn || "epicentre not yet determined"
   }
 
+  // pw-play is PipeWire's own player, which Omarchy already runs. The sounds
+  // are plain generated tones that live in the plugin directory; the script
+  // that made them sits beside them.
+  function playSound(isEew) {
+    if (root.nsettings.sound === false) return
+    Quickshell.execDetached(["pw-play",
+      root.pluginDir + (isEew ? "/sounds/warning.wav" : "/sounds/report.wav")])
+  }
+
   function showAlert(q, isEew) {
     root.alertQuake = q
     root.alertIsEew = isEew === true
+    root.playSound(root.alertIsEew)
     alertTimer.restart()
   }
 
@@ -172,6 +183,7 @@ Item {
   function syncDrafts() {
     root.draftThreshold = root.nsettings.threshold || "3"
     root.draftEarlyWarning = root.nsettings.earlyWarning !== false
+    root.draftSound = root.nsettings.sound !== false
     root.draftShortcut = root.nsettings.shortcut || ""
     root.draftBarIcon = root.nsettings.barIcon !== false
     root.draftBarSection = root.nsettings.barSection || "right"
@@ -184,6 +196,7 @@ Item {
       configured: true,
       threshold: root.draftThreshold,
       earlyWarning: root.draftEarlyWarning,
+      sound: root.draftSound,
       shortcut: root.draftShortcut,
       barIcon: root.draftBarIcon,
       barSection: root.draftBarSection,
@@ -860,6 +873,42 @@ Item {
               text: root.draftEarlyWarning
                 ? "緊急地震速報 — warnings that arrive seconds before the shaking, rather than minutes after. They are forecasts: occasionally overstated, and sometimes cancelled outright. Keeping them on holds one network connection open."
                 : "Off. Japan Quake Monitor will only ever show confirmed reports, which arrive a couple of minutes after a quake and are never wrong. No connection is held open."
+              color: root.foreground
+              opacity: 0.6
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.caption
+            }
+
+            Row {
+              spacing: Style.spacing.md
+              SettingLabel { text: "Alert sound" }
+              Row {
+                spacing: Style.space(4)
+                SettingPill {
+                  label: "on"
+                  active: root.draftSound
+                  onPicked: { root.draftSound = true }
+                }
+                SettingPill {
+                  label: "off"
+                  active: !root.draftSound
+                  onPicked: root.draftSound = false
+                }
+                SettingPill {
+                  label: "hear report"
+                  onPicked: Quickshell.execDetached(["pw-play", root.pluginDir + "/sounds/report.wav"])
+                }
+                SettingPill {
+                  label: "hear warning"
+                  onPicked: Quickshell.execDetached(["pw-play", root.pluginDir + "/sounds/warning.wav"])
+                }
+              }
+            }
+
+            Text {
+              width: parent.width
+              wrapMode: Text.WordWrap
+              text: "A short chime when a quake passes your threshold, and a more insistent one for an early warning — different on purpose, because they mean different things. The two buttons play them now."
               color: root.foreground
               opacity: 0.6
               font.family: root.fontFamily
