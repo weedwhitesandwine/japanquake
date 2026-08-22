@@ -22,6 +22,8 @@ Ui.BarWidget {
   readonly property string shindo: latest ? (latest.shindo || "") : ""
 
   readonly property bool opened: overlay ? overlay.opened === true : false
+
+  function plain(v) { return String(v === undefined || v === null ? "" : v).replace(/[<>]/g, "") }
   function open() { if (overlay) { overlay.view = "map"; overlay.opened = true } }
   function close() { if (overlay) overlay.close() }
 
@@ -32,8 +34,15 @@ Ui.BarWidget {
     // A font glyph rather than the emoji, so it takes the theme's foreground
     // colour like every other icon in the bar.
     text: "\uF0E7"
+    // The place name and the intensity both arrive off the network, and this
+    // sink is not ours: Omarchy's Ui/Button.qml renders tooltipText through a
+    // Text with no textFormat set, which leaves it on AutoText, where Qt
+    // decides for itself whether a string is writing or markup. Markup there
+    // can fetch a remote resource from inside the shell process, so the two
+    // characters that make a string markup are taken out first. Every Text in
+    // this plugin is pinned to plain text; this is the one sink that cannot be.
     tooltipText: root.latest
-      ? (root.overlay.placeOf(root.latest) + " · shindo " + root.shindo)
+      ? (root.plain(root.overlay.placeOf(root.latest)) + " · shindo " + root.plain(root.shindo))
       : "Japan Quake Monitor — no earthquake data yet"
     onPressed: function(b) {
       if (!root.overlay) return

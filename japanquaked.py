@@ -20,6 +20,7 @@ Depends on nothing outside the Python standard library.
 
 import base64
 import errno
+import hashlib
 import json
 import math
 import os
@@ -54,6 +55,13 @@ POLL_SECONDS = 30
 # and this process is long-lived, so it is truncated before it is parsed.
 MAX_HTTP_BYTES = 4 * 1024 * 1024
 MAX_FRAME_BYTES = 1 * 1024 * 1024
+# A message may arrive split across several frames, so the frame ceiling alone
+# does not bound one message; this bounds the reassembled whole.
+MAX_MESSAGE_BYTES = 1 * 1024 * 1024
+# The reply to the opening handshake is headers, and headers end when the
+# server says they do. Until it says so, this is the one read with no length
+# in front of it, so it carries its own ceiling.
+MAX_HANDSHAKE_BYTES = 16 * 1024
 MAX_QUAKES = 200
 
 # The same idea for the files in the state directory. This process writes them,
@@ -354,6 +362,12 @@ def merge_bulletins(quakes):
 # user to install a WebSocket library.
 # --------------------------------------------------------------------------
 
+# RFC 6455's fixed string. The server appends it to the key we sent, hashes
+# the pair, and sends the result back; a reply that cannot do that is not a
+# WebSocket server that read our request.
+WS_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
+
+
 class WebSocket:
     def __init__(self, host, port, path):
         key = base64.b64encode(os.urandom(16)).decode()
@@ -365,16 +379,44 @@ class WebSocket:
             f"Connection: Upgrade\r\nSec-WebSocket-Key: {key}\r\n"
             f"Sec-WebSocket-Version: 13\r\nUser-Agent: {USER_AGENT}\r\n\r\n"
         ).encode())
+        # Every later read has a length in front of it. This one does not: it
+        # ends at a marker the server chooses to send, so it is asked for no
+        # more than the ceiling plus the one byte that identifies an over-sized
+        # reply, and nothing beyond that is ever held.
         buf = b""
         while b"\r\n\r\n" not in buf:
-            chunk = self.sock.recv(4096)
+            want = MAX_HANDSHAKE_BYTES + 1 - len(buf)
+            if want <= 0:
+                raise ConnectionError(
+                    "handshake headers past %d bytes refused" % MAX_HANDSHAKE_BYTES)
+            chunk = self.sock.recv(min(4096, want))
             if not chunk:
                 raise ConnectionError("server closed during handshake")
             buf += chunk
         head, rest = buf.split(b"\r\n\r\n", 1)
-        if b"101" not in head.split(b"\r\n")[0]:
-            raise ConnectionError("handshake refused: %s" % head.split(b"\r\n")[0])
+        lines = head.split(b"\r\n")
+        if b"101" not in lines[0]:
+            raise ConnectionError("handshake refused: %s" % lines[0])
+        # TLS has already established who this is, so this proves nothing about
+        # identity. It proves the reply belongs to the request: a 101 alone can
+        # be echoed by anything.
+        expected = base64.b64encode(
+            hashlib.sha1((key + WS_GUID).encode()).digest()).decode()
+        echoed = ""
+        for line in lines[1:]:
+            name, _, value = line.partition(b":")
+            if name.strip().lower() == b"sec-websocket-accept":
+                echoed = value.strip().decode("ascii", "replace")
+        if echoed != expected:
+            raise ConnectionError("handshake reply did not echo the key back")
         self.buf = rest
+        # A message split across frames is assembled here rather than in a
+        # local, so a read timeout part-way through one resumes instead of
+        # losing what has already arrived.
+        self._started = False
+        self._is_text = False
+        self._parts = []
+        self._size = 0
 
     def _recv_exactly(self, n):
         while len(self.buf) < n:
@@ -401,10 +443,11 @@ class WebSocket:
     def ping(self):
         self._send_frame(0x9)
 
-    def recv_text(self):
-        """Return the next text message, or None for a frame we don't care
-        about (a pong, say). Raises on close."""
+    def _recv_frame(self):
+        """One frame: whether it finishes a message, what kind it is, and its
+        body."""
         b0, b1 = self._recv_exactly(2)
+        fin = bool(b0 & 0x80)
         opcode = b0 & 0x0F
         length = b1 & 0x7F
         if length == 126:
@@ -416,14 +459,59 @@ class WebSocket:
         if b1 & 0x80:                       # a server must never mask
             self._recv_exactly(4)
         payload = self._recv_exactly(length) if length else b""
-        if opcode == 0x8:
-            raise ConnectionError("server closed")
-        if opcode == 0x9:
-            self._send_frame(0xA, payload)  # pong back with the same body
-            return None
-        if opcode == 0x1:
-            return payload.decode("utf-8", "replace")
-        return None
+        return fin, opcode, payload
+
+    def recv_text(self):
+        """Return the next complete text message, or None for a frame that
+        carries no message (a ping, say). Raises on close.
+
+        A message need not arrive in one frame: the first frame carries the
+        kind with the final-frame bit clear and the rest are continuations.
+        These bulletins are a few kilobytes and are not usually split, but
+        nothing stops the server splitting them, and reading only the first
+        frame would hand on a truncated warning that then fails to parse —
+        losing exactly the message this plugin exists to deliver."""
+        while True:
+            fin, opcode, payload = self._recv_frame()
+
+            if opcode == 0x8:
+                raise ConnectionError("server closed")
+            if opcode == 0x9:               # ping, answerable mid-message
+                self._send_frame(0xA, payload)
+                continue
+            if opcode == 0xA:               # pong, nothing to do with it
+                continue
+
+            if opcode == 0x0:
+                if not self._started:
+                    raise ConnectionError("continuation frame with nothing to continue")
+            elif opcode in (0x1, 0x2):
+                if self._started:
+                    raise ConnectionError("a message began before the last one ended")
+                self._started, self._is_text = True, opcode == 0x1
+            else:
+                raise ConnectionError("frame of unknown kind %d" % opcode)
+
+            self._size += len(payload)
+            if self._size > MAX_MESSAGE_BYTES:
+                self._reset_message()
+                raise ConnectionError(
+                    "message past %d bytes refused" % MAX_MESSAGE_BYTES)
+            if self._is_text:
+                self._parts.append(payload)
+
+            if fin:
+                parts, was_text = self._parts, self._is_text
+                self._reset_message()
+                if not was_text:            # binary: not something this feed sends
+                    return None
+                return b"".join(parts).decode("utf-8", "replace")
+
+    def _reset_message(self):
+        self._started = False
+        self._is_text = False
+        self._parts = []
+        self._size = 0
 
     def close(self):
         try:
