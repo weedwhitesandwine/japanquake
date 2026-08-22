@@ -4,9 +4,9 @@ import qs.Ui as Ui
 import "Shindo.js" as Shindo
 import "."
 
-// The bar icon carries the one fact worth glancing at: how strong the most
-// recent earthquake was, in the colour Japan already uses for that number.
-// Clicking it opens the map.
+// Two lightning bolts, with a stripe beneath them in the colour Japan uses for
+// the intensity of the most recent quake — so a glance gives you the severity
+// even though the icon itself is fixed. Clicking opens the map.
 // (qs.Ui is imported under a namespace because this file is itself named
 // BarWidget.qml — a bare `BarWidget` would resolve to the file itself.)
 Ui.BarWidget {
@@ -29,7 +29,9 @@ Ui.BarWidget {
     id: button
     anchors.fill: parent
     bar: root.bar
-    text: root.shindo === "" ? "震" : root.shindo
+    // Two bolts. A font glyph rather than the emoji, so it takes the theme's
+    // foreground colour like every other icon in the bar.
+    text: "\uF0E7\uF0E7"
     tooltipText: root.latest
       ? (root.overlay.placeOf(root.latest) + " · shindo " + root.shindo)
       : "Japan Quake Monitor — no earthquake data yet"

@@ -137,8 +137,9 @@ the settings, never on its own:
 | `~/.config/omarchy/shell.json` | Only Japan Quake Monitor's own `{"id": "io.github.weedwhitesandwine.japanquake"}` entry, moved between the bar layout and the enabled-plugins list |
 
 **Commands it runs:** `python3` (the engine, and the JSON edit inside the
-helper), `bash` (the helper script and the settings write), and `hyprctl reload`
-so a newly chosen hotkey takes effect.
+helper), `bash` (the helper script and the settings write), `hyprctl reload` so
+a newly chosen hotkey takes effect, and `xdg-open` when you click one of the
+data-source links on the settings page.
 
 ## Dependencies
 

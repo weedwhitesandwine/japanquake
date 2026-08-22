@@ -316,6 +316,21 @@ Item {
     }
   }
 
+  component DataLink: Text {
+    property string url: ""
+    color: "#93c5fd"
+    font.family: root.fontFamily
+    font.pixelSize: Style.font.caption
+    font.underline: linkArea.containsMouse
+    MouseArea {
+      id: linkArea
+      anchors.fill: parent
+      hoverEnabled: true
+      cursorShape: Qt.PointingHandCursor
+      onClicked: Quickshell.execDetached(["xdg-open", parent.url])
+    }
+  }
+
   component ShindoBadge: Rectangle {
     property string shindo: ""
     property real size: Style.space(40)
@@ -908,6 +923,38 @@ Item {
                 SettingPill { label: "left"; active: root.draftBarSection === "left"; onPicked: root.draftBarSection = "left" }
                 SettingPill { label: "center"; active: root.draftBarSection === "center"; onPicked: root.draftBarSection = "center" }
                 SettingPill { label: "right"; active: root.draftBarSection === "right"; onPicked: root.draftBarSection = "right" }
+              }
+            }
+
+            Rectangle { width: parent.width; height: 1; color: root.border; opacity: 0.35 }
+
+            Column {
+              width: parent.width
+              spacing: Style.space(3)
+
+              Text {
+                width: parent.width
+                wrapMode: Text.WordWrap
+                text: "Every figure shown here comes from the Japan Meteorological Agency. This plugin measures nothing itself — check JMA directly for anything that matters."
+                color: root.foreground
+                opacity: 0.75
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.caption
+              }
+
+              DataLink {
+                text: "気象庁 JMA — earthquake information (English)"
+                url: "https://www.data.jma.go.jp/multi/quake/index.html?lang=en"
+              }
+
+              DataLink {
+                text: "気象庁 JMA — live map (Japanese)"
+                url: "https://www.jma.go.jp/bosai/map.html#contents=earthquake_map"
+              }
+
+              DataLink {
+                text: "P2P地震情報 — the relay this plugin reads"
+                url: "https://www.p2pquake.net/"
               }
             }
 
