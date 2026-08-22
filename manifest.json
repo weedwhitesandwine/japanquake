@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "id": "io.github.weedwhitesandwine.namazu",
+  "name": "Namazu",
+  "version": "0.1.0",
+  "author": "weedwhitesandwine",
+  "license": "MIT",
+  "description": "Japanese earthquakes on a map of Japan, with a pop-up when one happens",
+  "kinds": [
+    "overlay",
+    "bar-widget"
+  ],
+  "keepLoaded": true,
+  "entryPoints": {
+    "overlay": "Namazu.qml",
+    "barWidget": "BarWidget.qml"
+  },
+  "barWidget": {
+    "displayName": "Namazu",
+    "description": "Shows the most recent Japanese earthquake and its intensity; click for the map",
+    "category": "System",
+    "allowMultiple": false,
+    "defaultSection": "right"
+  }
+}
