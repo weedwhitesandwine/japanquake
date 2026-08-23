@@ -185,10 +185,15 @@ Item {
   // the settings themselves have been read at least once.
   property bool settingsLoaded: false
 
+  // Written to an exclusively-created temporary name beside the file and
+  // renamed over it: a bare `>` redirection truncates whatever already sits
+  // at that path — including the target of a symlink a restored backup could
+  // have left there — before the new content lands. `-O` confirms the state
+  // directory is ours before anything is staged in it.
   function saveSettings() {
     if (!root.settingsLoaded) return
     Quickshell.execDetached(["bash", "-c",
-      'mkdir -p "$(dirname "$2")" && printf "%s\\n" "$1" > "$2"', "--",
+      'd=$(dirname "$2") && mkdir -p "$d" && [ -O "$d" ] && t=$(mktemp "$2.XXXXXXXX") && printf "%s\\n" "$1" > "$t" && mv -f "$t" "$2"', "--",
       JSON.stringify(root.nsettings), root.settingsFile])
   }
 

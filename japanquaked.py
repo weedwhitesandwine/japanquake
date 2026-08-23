@@ -26,8 +26,10 @@ import math
 import os
 import socket
 import ssl
+import stat
 import struct
 import sys
+import tempfile
 import time
 import urllib.error
 import urllib.request
@@ -101,13 +103,32 @@ def log(*a):
 
 
 def ensure_state_dir():
-    os.makedirs(STATE_DIR, exist_ok=True)
+    """Create the state directory and confirm it is fit to write into.
+
+    Every file this process writes goes through a temporary name in this
+    directory, so the directory itself has to be trustworthy: owned by us,
+    and writable by nobody else. A directory someone else can write is a
+    directory where names can be swapped out from under a rename."""
+    os.makedirs(STATE_DIR, mode=0o700, exist_ok=True)
+    st = os.stat(STATE_DIR)
+    if st.st_uid != os.getuid() or (st.st_mode & 0o022):
+        raise RuntimeError(
+            "%s is not an owner-only directory; refusing to write there" % STATE_DIR)
 
 
 def take_lock():
     """A second copy should step aside quietly, not fight over the socket."""
     ensure_state_dir()
-    fd = os.open(LOCK_FILE, os.O_RDWR | os.O_CREAT, 0o644)
+    # O_NOFOLLOW: the lock is truncated below, and truncating through a
+    # symlink somebody planted at this well-known name would truncate
+    # whatever the link points at instead of a lock file.
+    try:
+        fd = os.open(LOCK_FILE, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
+    except OSError as e:
+        if e.errno == errno.ELOOP:
+            log("refusing lock file that is a symlink:", LOCK_FILE)
+            return None
+        raise
     try:
         import fcntl
         fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -123,12 +144,49 @@ def take_lock():
 def read_json_file(path, ceiling):
     """Read one of our own state files, refusing it if it is past its ceiling.
     Reading a byte more than the ceiling is what tells us it is too big, so
-    nothing larger is ever held, let alone parsed."""
-    with open(path, "rb") as f:
-        raw = f.read(ceiling + 1)
+    nothing larger is ever held, let alone parsed.
+
+    Opened without following symlinks and checked to be a regular file first:
+    this directory is where a restored backup lands, and a symlink or FIFO
+    left at one of these names must not redirect the read or block it forever
+    — open() on a FIFO with no writer simply never returns."""
+    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    try:
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            raise ValueError("%s is not a regular file" % path)
+        with os.fdopen(fd, "rb") as f:
+            fd = None
+            raw = f.read(ceiling + 1)
+    finally:
+        if fd is not None:
+            os.close(fd)
     if len(raw) > ceiling:
         raise ValueError("%s is larger than %d bytes" % (path, ceiling))
     return json.loads(raw.decode("utf-8", "replace"))
+
+
+def write_json_atomic(path, payload, **dump_kw):
+    """Replace one of our own state files without ever writing through a name
+    an attacker could have planted first.
+
+    The temporary file is created by mkstemp — an unpredictable name, opened
+    with O_CREAT|O_EXCL, which never follows a symlink — inside the state
+    directory that ensure_state_dir() has already verified is owner-only.
+    Only then is it renamed over the destination, so the destination is
+    replaced in one step or left alone."""
+    ensure_state_dir()
+    fd, tmp = tempfile.mkstemp(prefix=".japanquake.", suffix=".tmp",
+                               dir=os.path.dirname(path))
+    try:
+        with os.fdopen(fd, "w") as f:
+            json.dump(payload, f, **dump_kw)
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
 
 
 def read_settings():
@@ -177,10 +235,7 @@ def refresh_place_names():
             names[ja] = en
             added += 1
     if added:
-        tmp = NAMES_FILE + ".tmp"
-        with open(tmp, "w") as f:
-            json.dump(names, f, ensure_ascii=False)
-        os.replace(tmp, NAMES_FILE)
+        write_json_atomic(NAMES_FILE, names, ensure_ascii=False)
     return added
 
 
@@ -293,10 +348,7 @@ def write_state(**changes):
         state = {}
     state.update(changes)
     state["updated"] = time.time()
-    tmp = STATE_FILE + ".tmp"
-    with open(tmp, "w") as f:
-        json.dump(state, f)
-    os.replace(tmp, STATE_FILE)
+    write_json_atomic(STATE_FILE, state)
 
 
 def fetch_reports():

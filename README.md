@@ -179,6 +179,14 @@ so it is treated as data and never as code:
   parse, and is refused, leaving the last good values in place. A 400 MB file
   planted in place of the state file moves the shell's memory by about 7 MB and
   changes nothing on screen.
+- Every file the plugin replaces is staged under an unpredictable name created
+  exclusively (`mkstemp`, which never follows a symlink) in a directory first
+  verified to be owned by the user and writable by nobody else, then renamed
+  over the destination in one atomic step. A symlink or FIFO planted at any
+  name the plugin reads or writes — its state files, its lock file, its
+  temporary names, or `shell.json` — is refused rather than followed, so a
+  restored backup cannot redirect a write onto another file, and a FIFO cannot
+  park a read forever.
 
 ## Dependencies
 
