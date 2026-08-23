@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "io.github.weedwhitesandwine.japanquake",
   "name": "Japan Quake Monitor",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "author": "weedwhitesandwine",
   "license": "MIT",
   "description": "Japanese earthquakes on a map of Japan, with a pop-up when one happens",

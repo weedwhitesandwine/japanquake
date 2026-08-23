@@ -139,7 +139,13 @@ if entry is None:
     entry = {"id": ID}
 
 if state == "on":
-    layout.setdefault(sec, [])
+    # Every other level of this file is shape-checked before use; this was the
+    # one that took whatever was there and appended to it. A section that is
+    # not a list raises, the script dies under `set -e`, and because it runs
+    # detached with stderr discarded the bar choice simply never happens —
+    # while every other malformed shape is handled by leaving the file alone.
+    if not isinstance(layout.get(sec), list):
+        layout[sec] = []
     layout[sec].append(entry)
 else:
     cfg["plugins"].append(entry)

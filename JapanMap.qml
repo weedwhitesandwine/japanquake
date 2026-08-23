@@ -111,6 +111,7 @@ Item {
 
       // The newest quake breathes, so the eye finds it without being told.
       Rectangle {
+        id: pulse
         anchors.centerIn: parent
         visible: parent.latest
         width: parent.dotSize; height: width; radius: width / 2
@@ -118,13 +119,13 @@ Item {
         border.color: Shindo.color(modelData.shindo)
         border.width: 2
         SequentialAnimation on scale {
-          running: parent.visible
+          running: pulse.visible
           loops: Animation.Infinite
           NumberAnimation { from: 1.0; to: 2.6; duration: 1800; easing.type: Easing.OutQuad }
           PropertyAction { value: 1.0 }
         }
         SequentialAnimation on opacity {
-          running: parent.visible
+          running: pulse.visible
           loops: Animation.Infinite
           NumberAnimation { from: 0.7; to: 0.0; duration: 1800 }
         }

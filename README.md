@@ -174,11 +174,11 @@ so it is treated as data and never as code:
   after, because this runs inside a shell process that lives for days. The
   engine reads each of its own files up to its ceiling and one byte further —
   that byte is what tells it the file is too big — and refuses it there. The
-  shell reads them through `head`, so it is handed at most the ceiling however
-  large the file on disk actually is; anything larger arrives cut off, fails to
-  parse, and is refused, leaving the last good values in place. A 400 MB file
-  planted in place of the state file moves the shell's memory by about 7 MB and
-  changes nothing on screen.
+  shell reads them through an open that refuses to follow a symlink, refuses to
+  wait on a pipe, and refuses anything that is not a plain file — and that
+  hands back nothing at all rather than a file over its ceiling, reporting the
+  refusal rather than answering as though the file were empty. A 400 MB file
+  planted in place of the state file changes nothing on screen.
 - Every file the plugin replaces is staged under an unpredictable name created
   exclusively (`mkstemp`, which never follows a symlink) in a directory first
   verified to be owned by the user and writable by nobody else, then renamed
@@ -190,8 +190,11 @@ so it is treated as data and never as code:
 
 ## Dependencies
 
-`bash`, `python3`, `hyprctl` and `pw-play`, all of which Omarchy already
-installs — `pw-play` comes with PipeWire.
+`bash`, `python3`, `hyprctl`, `setpriv`, `xdg-open` and `pw-play`, all of which
+Omarchy already installs — `pw-play` comes with PipeWire, `setpriv` with
+util-linux, and `xdg-open` with xdg-utils. `setpriv` is what keeps the engine
+from outliving the shell; `xdg-open` opens the JMA and P2P pages when you click
+one of the links in the panel.
 
 ## Licence
 

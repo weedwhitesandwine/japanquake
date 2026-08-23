@@ -79,6 +79,23 @@ TOKYO_LAT, TOKYO_LON = 35.681, 139.767
 # JMA's shindo scale is not linear and is not a number: 5 and 6 are each split
 # into a weak and a strong band. The relay encodes it times ten, with the split
 # bands at 45/50 and 55/60.
+# The relay says "no epicentre in this bulletin" with -200, not with -1 or 0 —
+# and it is the intensity-only first bulletin that carries it, which is exactly
+# the one the alert card fires on. Left in, it survives the cleaning and the
+# distance maths happily returns a number: every quake's first alert read
+# "13467 km NNW of Tokyo". Anything outside the range a real coordinate can
+# occupy is not a coordinate.
+def coord(v):
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        return None
+    # -1 and 0 are the relay's older ways of saying the same thing.
+    if f != f or abs(f) > 180.0 or f in (0.0, -1.0):
+        return None
+    return f
+
+
 SHINDO = {
     10: "1", 20: "2", 30: "3", 40: "4",
     45: "5-", 50: "5+", 55: "6-", 60: "6+", 70: "7",
@@ -223,6 +240,22 @@ def fetch_json(url):
     return json.loads(raw.decode("utf-8", "replace"))
 
 
+# When the list was last fetched, and how long to leave it.
+_names_checked_at = 0.0
+NAMES_MAX_AGE = 3600.0
+
+
+def maybe_refresh_place_names(force=False):
+    """Refresh at most hourly. Nothing is lost by waiting: an unknown place
+    name simply stays in Japanese until the next refresh."""
+    global _names_checked_at
+    now = time.time()
+    if not force and (now - _names_checked_at) < NAMES_MAX_AGE:
+        return 0
+    _names_checked_at = now
+    return refresh_place_names()
+
+
 def refresh_place_names():
     data = fetch_json(JMA_LIST_URL)
     if not isinstance(data, list):
@@ -275,9 +308,9 @@ def clean_quake(item):
     def maybe(v):
         return None if v in (None, -1, -1.0) else v
 
-    lat = maybe(hypo.get("latitude"))
-    lon = maybe(hypo.get("longitude"))
-    if lat == 0 and lon == 0:
+    lat = coord(hypo.get("latitude"))
+    lon = coord(hypo.get("longitude"))
+    if lat is None or lon is None:
         lat = lon = None
 
     scale = eq.get("maxScale")
@@ -318,9 +351,12 @@ def clean_eew(item):
     outright a moment later."""
     body = item.get("earthquake") or {}
     hypo = body.get("hypocenter") or {}
-    lat = hypo.get("latitude")
-    lon = hypo.get("longitude")
-    if lat in (None, -1, 0) and lon in (None, -1, 0):
+    # Either one missing means there is no usable epicentre: keeping the half
+    # that was stated produces a confident-looking distance and bearing from a
+    # coordinate that was never given.
+    lat = coord(hypo.get("latitude"))
+    lon = coord(hypo.get("longitude"))
+    if lat is None or lon is None:
         lat = lon = None
     return {
         "id": item.get("id"),
@@ -352,8 +388,14 @@ def write_state(**changes):
 
 
 def fetch_reports():
+    # The place-name list is a ~900 KB file that changes about as often as
+    # Japan gains a new municipality. Fetching it on every poll was ~2.6 GB a
+    # day at a public government server, and it happens on the same thread as
+    # the early-warning socket — so for as long as it took, the one message
+    # this plugin exists to deliver could not be read. Hourly, and only when
+    # something is actually missing from it.
     try:
-        refresh_place_names()
+        maybe_refresh_place_names()
     except Exception as e:
         log("place-name refresh failed (names stay Japanese):", e)
     data = fetch_json(HISTORY_URL)
@@ -495,23 +537,52 @@ class WebSocket:
     def ping(self):
         self._send_frame(0x9)
 
+    def _try_frame(self):
+        """A whole frame from what has already arrived, or None if not all of
+        it is here yet. Nothing is taken out of the buffer until the frame is
+        complete, which is what makes a read that times out part-way through
+        harmless: the next attempt starts from the same header rather than
+        reading the body as one."""
+        buf = self.buf
+        if len(buf) < 2:
+            return None
+        b0, b1 = buf[0], buf[1]
+        masked = bool(b1 & 0x80)
+        if masked:
+            # A server must never mask. Reading past it and handing on the
+            # still-masked bytes would produce garbage that fails to parse.
+            raise ConnectionError("server sent a masked frame")
+        length = b1 & 0x7F
+        at = 2
+        if length == 126:
+            if len(buf) < at + 2:
+                return None
+            length = struct.unpack(">H", buf[at:at + 2])[0]
+            at += 2
+        elif length == 127:
+            if len(buf) < at + 8:
+                return None
+            length = struct.unpack(">Q", buf[at:at + 8])[0]
+            at += 8
+        if length > MAX_FRAME_BYTES:
+            raise ConnectionError("frame of %d bytes refused" % length)
+        if len(buf) < at + length:
+            return None
+        payload = buf[at:at + length]
+        self.buf = buf[at + length:]
+        return bool(b0 & 0x80), b0 & 0x0F, payload
+
     def _recv_frame(self):
         """One frame: whether it finishes a message, what kind it is, and its
         body."""
-        b0, b1 = self._recv_exactly(2)
-        fin = bool(b0 & 0x80)
-        opcode = b0 & 0x0F
-        length = b1 & 0x7F
-        if length == 126:
-            length = struct.unpack(">H", self._recv_exactly(2))[0]
-        elif length == 127:
-            length = struct.unpack(">Q", self._recv_exactly(8))[0]
-        if length > MAX_FRAME_BYTES:
-            raise ConnectionError("frame of %d bytes refused" % length)
-        if b1 & 0x80:                       # a server must never mask
-            self._recv_exactly(4)
-        payload = self._recv_exactly(length) if length else b""
-        return fin, opcode, payload
+        while True:
+            frame = self._try_frame()
+            if frame is not None:
+                return frame
+            chunk = self.sock.recv(65536)
+            if not chunk:
+                raise ConnectionError("closed")
+            self.buf += chunk
 
     def recv_text(self):
         """Return the next complete text message, or None for a frame that

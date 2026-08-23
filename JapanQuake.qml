@@ -77,7 +77,7 @@ Item {
   readonly property string settingsFile: root.stateDir + "/settings.json"
   property var nsettings: ({
     configured: false, threshold: "3", earlyWarning: true, sound: true,
-    shortcut: "", barIcon: true, barSection: "right", lastSeen: "", lastEew: ""
+    shortcut: "", barIcon: true, barSection: "right", lastSeenTime: "", lastEew: ""
   })
 
   property string draftThreshold: "3"
@@ -155,19 +155,41 @@ Item {
   // A new confirmed report, or a new early warning, decides whether to
   // interrupt. Everything quieter than the chosen threshold still lands on the
   // map and in the list — it simply does not take over the screen.
+  // Keyed on the quake's time, not the bulletin's id. JMA issues one
+  // earthquake in instalments and the engine folds them into whichever
+  // bulletin is fullest — which means the id CHANGES as the fuller reports
+  // arrive, so "have I shown this?" never matched and the same quake
+  // interrupted two to four times, chime and all. The time is the merge key
+  // and is the one thing every instalment agrees on.
   function considerReport() {
-    if (!root.latest || !root.latest.id) return
-    if (root.latest.id === root.nsettings.lastSeen) return
-    var firstEver = !root.nsettings.lastSeen
+    if (!root.latest || !root.latest.time) return
+    if (root.latest.time === root.nsettings.lastSeenTime) return
+    var firstEver = !root.nsettings.lastSeenTime
     var s = root.nsettings
-    s.lastSeen = root.latest.id
+    s.lastSeenTime = root.latest.time
     root.nsettings = s
     root.saveSettings()
     // On the very first run there is always a "latest" quake, hours old.
     // Announcing it would be a lie about something just having happened.
     if (firstEver) return
-    if (Shindo.rank(root.latest.shindo) >= Shindo.rank(root.nsettings.threshold || "3"))
+    if (Shindo.rank(root.latest.shindo) >= Shindo.rank(root.chosenThreshold))
       root.showAlert(root.latest, false)
+  }
+
+  // An early warning is only news while it is happening. The stored one
+  // outlives the shell, so without this a warning from days ago announces
+  // itself — with the urgent chime — on any start where the settings have not
+  // been read yet. The confirmed-report path has always had this guard; the
+  // warning path, which is the louder of the two, did not.
+  readonly property int eewMaxAgeSeconds: 180
+
+  // A threshold the scale does not contain ranks as zero, which would let
+  // every tremor — and every bulletin with no intensity at all — take over the
+  // screen with a chime. A hand-edited "5" rather than the "5-"/"5+" the UI
+  // writes was enough to do it.
+  readonly property string chosenThreshold: {
+    var t = root.nsettings.threshold
+    return (typeof t === "string" && Shindo.rank(t) > 0) ? t : "3"
   }
 
   function considerEew() {
@@ -179,6 +201,8 @@ Item {
     s.lastEew = root.eew.id
     root.nsettings = s
     root.saveSettings()
+    var age = (Date.now() / 1000) - (root.eew.at || 0)
+    if (!root.eew.at || age > root.eewMaxAgeSeconds) return
     // A cancellation is worth showing only if we showed the warning it cancels.
     if (root.eew.cancelled && !root.alertIsEew) return
     root.showAlert(root.eew, true)
@@ -251,7 +275,7 @@ Item {
       shortcut: root.validShortcut(root.draftShortcut) ? root.draftShortcut : "",
       barIcon: root.draftBarIcon,
       barSection: root.draftBarSection,
-      lastSeen: root.nsettings.lastSeen || "",
+      lastSeenTime: root.nsettings.lastSeenTime || "",
       lastEew: root.nsettings.lastEew || ""
     }
     root.nsettings = s
@@ -287,6 +311,13 @@ Item {
     else if (event.key >= Qt.Key_0 && event.key <= Qt.Key_9) name = String.fromCharCode(48 + (event.key - Qt.Key_0))
     else if (event.key >= Qt.Key_F1 && event.key <= Qt.Key_F12) name = "F" + (event.key - Qt.Key_F1 + 1)
     if (name === "") return
+    // Shift on its own does not qualify — the guidance already says so, but
+    // only "no modifier at all" was refused, so SHIFT + A bound capital A
+    // globally and typing one anywhere opened the overlay.
+    if (mods.length === 1 && mods[0] === "SHIFT") {
+      root.captureNote = "Shift on its own is not enough — hold SUPER, CTRL or ALT too"
+      return
+    }
     if (mods.length === 0) { root.captureNote = "Add a modifier — SUPER, CTRL or ALT"; return }
     root.draftShortcut = mods.join(" + ") + " + " + name
     root.captureNote = ""
@@ -384,7 +415,11 @@ Item {
     command: ["setpriv", "--pdeathsig", "TERM",
               "python3", root.pluginDir + "/japanquaked.py", "daemon"]
     running: true
-    onExited: daemonRestart.restart()
+    // Exit 0 is the engine choosing to stop — most often because another
+    // shell instance already holds the lock and this copy stepped aside.
+    // Restarting it then spawns a Python process every ten seconds for as
+    // long as both shells are up. Only a failure is worth retrying.
+    onExited: function(code) { if (code !== 0) daemonRestart.restart() }
   }
 
   Timer {
