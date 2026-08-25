@@ -46,23 +46,30 @@ resolve_bind_file() {
   printf '%s' "$real"
 }
 
+# Both of these read the file the write is going to land on — the resolved
+# one — rather than the name it was reached by. Inspecting through the link
+# and writing to its target leaves a window in which the link can be swung at
+# another readable file between the two, and its contents would then be
+# copied into bindings.lua. It takes somebody already writing this home
+# directory, but the resolved path costs nothing and closes it.
 check_markers() {
-  local opens closes o c
-  opens=$(grep -c -- ">>> japanquake hotkey" "$BIND_FILE" || true)
-  closes=$(grep -c -- "<<< japanquake hotkey" "$BIND_FILE" || true)
+  local file="$1" opens closes
+  opens=$(grep -c -- ">>> japanquake hotkey" "$file" || true)
+  closes=$(grep -c -- "<<< japanquake hotkey" "$file" || true)
   if (( opens != closes )); then
-    echo "japanquake-ctl: refusing to edit $BIND_FILE — its hotkey block is not a matched pair ($opens opening, $closes closing)" >&2
+    echo "japanquake-ctl: refusing to edit $file — its japanquake hotkey block is not a matched pair ($opens opening, $closes closing)" >&2
     return 1
   fi
   if (( opens > 1 )); then
-    echo "japanquake-ctl: refusing to edit $BIND_FILE — $opens hotkey blocks, expected at most one" >&2
+    echo "japanquake-ctl: refusing to edit $file — $opens japanquake hotkey blocks, expected at most one" >&2
     return 1
   fi
   if (( opens == 1 )); then
-    o=$(grep -n -- ">>> japanquake hotkey" "$BIND_FILE" | head -1 | cut -d: -f1)
-    c=$(grep -n -- "<<< japanquake hotkey" "$BIND_FILE" | head -1 | cut -d: -f1)
+    local o c
+    o=$(grep -n -- ">>> japanquake hotkey" "$file" | head -1 | cut -d: -f1)
+    c=$(grep -n -- "<<< japanquake hotkey" "$file" | head -1 | cut -d: -f1)
     if (( c < o )); then
-      echo "japanquake-ctl: refusing to edit $BIND_FILE — its hotkey block closes before it opens" >&2
+      echo "japanquake-ctl: refusing to edit $file — its japanquake hotkey block closes before it opens" >&2
       return 1
     fi
   fi
@@ -70,12 +77,22 @@ check_markers() {
 }
 
 strip_block() {
-  # print bindings.lua without Japan Quake Monitor's marked block
+  local file="$1"
+  # The block is written with a blank line above it, for legibility. That
+  # blank is ours, so it has to come out with the block — stripping only the
+  # marked lines left one behind on every re-bind, and three hotkey changes
+  # meant three orphan blank lines accumulating in a file the README promises
+  # is otherwise untouched. Blank lines the user has of their own are held and
+  # re-emitted; exactly one, immediately above the opening marker, is dropped.
   awk '
-    index($0, ">>> japanquake hotkey") { skip = 1; next }
+    function flush(  i) { for (i = 0; i < pending; i++) print ""; pending = 0 }
+    index($0, ">>> japanquake hotkey") { if (pending > 0) pending--; flush(); skip = 1; next }
     index($0, "<<< japanquake hotkey") { skip = 0; next }
-    !skip { print }
-  ' "$BIND_FILE"
+    skip { next }
+    $0 == "" { pending++; next }
+    { flush(); print }
+    END { flush() }
+  ' "$file"
 }
 
 case "$1" in
@@ -106,8 +123,8 @@ if ! [[ $key =~ $KEY_SHAPE ]]; then
     REAL_BIND=$(resolve_bind_file) || exit 1
     tmp=$(mktemp "$REAL_BIND.XXXXXXXX")
     trap 'rm -f "$tmp"' EXIT
-    check_markers || exit 1
-    strip_block > "$tmp"
+    check_markers "$REAL_BIND" || exit 1
+    strip_block "$REAL_BIND" > "$tmp"
     {
       echo ""
       echo "$MARK_IN"
@@ -124,8 +141,8 @@ if ! [[ $key =~ $KEY_SHAPE ]]; then
     REAL_BIND=$(resolve_bind_file) || exit 1
     tmp=$(mktemp "$REAL_BIND.XXXXXXXX")
     trap 'rm -f "$tmp"' EXIT
-    check_markers || exit 1
-    strip_block > "$tmp"
+    check_markers "$REAL_BIND" || exit 1
+    strip_block "$REAL_BIND" > "$tmp"
     chmod --reference="$REAL_BIND" "$tmp" 2>/dev/null || chmod 644 "$tmp"
     mv -f "$tmp" "$REAL_BIND"
     trap - EXIT
@@ -141,96 +158,97 @@ import json, os, stat, sys, tempfile
 state = sys.argv[1]
 sec = sys.argv[2] if sys.argv[2] in ("left", "center", "right") else "right"
 ID = "io.github.weedwhitesandwine.japanquake"
-p = os.path.expanduser("~/.config/omarchy/shell.json")
-# This is somebody else's file and it is read back before being rewritten, so
-# it gets the same treatment as everything else the plugin reads: the ceiling
-# goes at the read, and the extra byte is what identifies an over-sized file.
-# Refusing means leaving shell.json exactly as it was, which is the right
-# answer anyway — a file this process cannot make sense of is not one it
-# should be rewriting. The open refuses symlinks and non-regular files, so a
-# planted link cannot redirect the read and a FIFO cannot block it forever.
+
+def refuse(why):
+    sys.stderr.write("japanquake-ctl: leaving shell.json alone — %s\n" % why)
+    raise SystemExit(1)
+
+link = os.path.expanduser("~/.config/omarchy/shell.json")
+# A dotfiles manager (stow, chezmoi) puts a symlink at this name pointing into
+# its own repository. Refusing every symlink meant those users could not turn
+# the readout on at all — and the refusal was silent, so the settings card
+# reported success while nothing had happened. Resolve the name and work on
+# the file it really is, the same way the hotkey block does: the link
+# survives, the repository stays the thing that owns the content, and a link
+# pointing at something that is not the user's own is still refused.
+p = os.path.realpath(link)
+home_cfg = os.path.dirname(p)
+try:
+    st = os.stat(home_cfg)
+except OSError:
+    refuse("%s is not a directory this script can reach" % home_cfg)
+if st.st_uid != os.getuid() or (st.st_mode & 0o022):
+    refuse("%s is not yours, or is writable by others" % home_cfg)
+
+# shell.json belongs to the user, not to this plugin, and it is read back
+# before it is rewritten — so it gets the ceiling every other read here has,
+# put at the read, with the extra byte that identifies an over-sized file.
+# Refusing means leaving the file exactly as it stands, which is the right
+# answer for a file this script cannot make sense of. The open refuses
+# symlinks and non-regular files, so a link planted at the resolved name
+# cannot redirect the read and a FIFO cannot block it forever.
 MAX_SHELL_JSON = 4 * 1024 * 1024
 try:
     fd = os.open(p, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
-    try:
-        if not stat.S_ISREG(os.fstat(fd).st_mode):
-            sys.exit(0)
-        with os.fdopen(fd, "rb") as f:
-            fd = None
-            raw = f.read(MAX_SHELL_JSON + 1)
-    finally:
-        if fd is not None:
-            os.close(fd)
-    if len(raw) > MAX_SHELL_JSON:
-        sys.exit(0)
-    cfg = json.loads(raw.decode("utf-8", "replace"))
-except SystemExit:
-    raise
-except Exception:
-    sys.exit(0)
-# Valid JSON of the wrong shape is not a config file. Each level is checked
-# before it is used, because setdefault happily hands back a string.
-if not isinstance(cfg, dict):
-    sys.exit(0)
+except OSError as exc:
+    refuse("cannot read %s (%s)" % (p, exc.strerror))
+try:
+    if not stat.S_ISREG(os.fstat(fd).st_mode):
+        os.close(fd)
+        refuse("%s is not a regular file" % p)
+    with os.fdopen(fd, "rb") as f:
+        raw = f.read(MAX_SHELL_JSON + 1)
+except OSError as exc:
+    refuse("cannot read %s (%s)" % (p, exc.strerror))
+if len(raw) > MAX_SHELL_JSON:
+    refuse("%s is larger than %d bytes" % (p, MAX_SHELL_JSON))
+if os.stat(p).st_uid != os.getuid():
+    refuse("%s is not yours" % p)
+try:
+    d = json.loads(raw.decode("utf-8", "replace"))
+except ValueError:
+    refuse("%s is not valid JSON" % p)
 
-if not isinstance(cfg.get("bar"), dict):
-    cfg["bar"] = {}
-bar = cfg["bar"]
-if not isinstance(bar.get("layout"), dict):
-    bar["layout"] = {}
-layout = bar["layout"]
-if not isinstance(cfg.get("plugins"), list):
-    cfg["plugins"] = []
-plugins = cfg["plugins"]
-
-def drop(seq):
-    return [e for e in seq if not (isinstance(e, dict) and e.get("id") == ID)]
-
-entry = None
-for key in ("left", "center", "right"):
-    section = layout.get(key)
-    if not isinstance(section, list):
-        continue
-    for e in section:
-        if isinstance(e, dict) and e.get("id") == ID:
-            entry = e
-    layout[key] = drop(section)
-for e in plugins:
-    if isinstance(e, dict) and e.get("id") == ID:
-        entry = e
-cfg["plugins"] = drop(plugins)
-
-if entry is None:
-    entry = {"id": ID}
+# Valid JSON of the wrong shape is not a config file, and setdefault will
+# happily hand back a string to be subscripted. Each level is checked, and
+# nothing is created that the entry does not actually need: turning the
+# readout on adds the one section it goes into, turning it off adds the
+# plugins list it goes into, and no other key is invented on the way past.
+if not isinstance(d, dict):
+    refuse("%s is not a JSON object" % p)
+def eid(w): return w.get("id") if isinstance(w, dict) else w
+bar = d.get("bar")
+lay = bar.get("layout") if isinstance(bar, dict) else None
+if isinstance(lay, dict):
+    for s in lay:
+        if isinstance(lay[s], list):
+            lay[s] = [w for w in lay[s] if eid(w) != ID]
+if isinstance(d.get("plugins"), list):
+    d["plugins"] = [w for w in d["plugins"] if eid(w) != ID]
 
 if state == "on":
-    # Every other level of this file is shape-checked before use; this was the
-    # one that took whatever was there and appended to it. A section that is
-    # not a list raises, the script dies under `set -e`, and because it runs
-    # detached with stderr discarded the bar choice simply never happens —
-    # while every other malformed shape is handled by leaving the file alone.
-    if not isinstance(layout.get(sec), list):
-        layout[sec] = []
-    layout[sec].append(entry)
+    if not isinstance(d.get("bar"), dict):
+        d["bar"] = {}
+    if not isinstance(d["bar"].get("layout"), dict):
+        d["bar"]["layout"] = {}
+    if not isinstance(d["bar"]["layout"].get(sec), list):
+        d["bar"]["layout"][sec] = []
+    d["bar"]["layout"][sec].append({"id": ID})
 else:
-    cfg["plugins"].append(entry)
+    if not isinstance(d.get("plugins"), list):
+        d["plugins"] = []
+    d["plugins"].append({"id": ID})
 
-# The replacement is staged under an unpredictable name created exclusively
-# by mkstemp — which never follows a symlink — in a directory verified to be
-# owned by us and writable by nobody else, then renamed over the destination
-# in one step. A predictable name here would let a pre-planted symlink turn
-# this write into the truncation of whatever the link pointed at.
-d = os.path.dirname(p)
-try:
-    st = os.stat(d)
-    if st.st_uid != os.getuid() or (st.st_mode & 0o022):
-        sys.exit(0)
-except OSError:
-    sys.exit(0)
-fd, tmp = tempfile.mkstemp(prefix=".shell.json.", suffix=".tmp", dir=d)
+# Staged under an unpredictable name created exclusively by mkstemp — which
+# never follows a symlink — in a directory verified to be owned by us and
+# writable by nobody else, then renamed over the destination in one step.
+# Writing in place would truncate the user's shell configuration before
+# rebuilding it, and a predictable stage name would let a pre-planted symlink
+# turn this write into the truncation of whatever the link pointed at.
+fd, tmp = tempfile.mkstemp(prefix=".shell.json.", suffix=".tmp", dir=home_cfg)
 try:
     with os.fdopen(fd, "w") as f:
-        json.dump(cfg, f, indent=2)
+        json.dump(d, f, indent=2)
         f.write("\n")
     try:
         os.chmod(tmp, os.stat(p).st_mode & 0o777)
